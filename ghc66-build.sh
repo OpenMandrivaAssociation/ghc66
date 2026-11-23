@@ -155,9 +155,13 @@ mkdir -p "$GA"
 (
 	cd "$GA"
 	/bin/cp -f "$R/build/repro-622/src/ghc-6.2.2/ghc/utils/genapply/GenApply.hs" GenApply.hs
+	# mhs takes -I and -i glued to the path. A bare -I is passed to
+	# cpphs with no directory, and a bare -i clears the module path,
+	# so the following arguments become extra modules and mhs prints
+	# its usage. Same form as build/rts622/genapply/build-genapply.sh.
 	mhs -XCPP -D__GLASGOW_HASKELL__=622 -DNO_REGS \
-		-I "$R/build/repro-622/src/ghc-6.2.2/ghc/utils/genapply" \
-		-i. -i "$R/ghc622/rts/genapply-shim" \
+		-I"$R/build/repro-622/src/ghc-6.2.2/ghc/utils/genapply" \
+		-i. -i"$R/ghc622/rts/genapply-shim" \
 		GenApply.hs -ogenapply
 	./genapply > "$RTS/AutoApply.hc"
 )
