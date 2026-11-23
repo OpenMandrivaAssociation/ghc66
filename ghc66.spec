@@ -1,4 +1,5 @@
 %global debug_package %{nil}
+%global _find_debuginfo_opts --no-ar-files
 Summary:	GHC 6.6 compiled from source by MicroHs
 Name:		ghc66
 Version:	6.6
