@@ -148,7 +148,10 @@ else
 fi
 here=\$(CDPATH= cd -- "\$(dirname "\$arg0")" && pwd)
 root=\$(dirname "\$here")
-exec "\$root/$libname/ghc-6.6/$rel" -B"\$root/$libname/ghc-6.6" "\$@"
+top="\$root/$libname/ghc-6.6"
+# cGCC is the bare name host-gcc. It has to win over /usr/bin/gcc.
+export PATH="\$top/bin:\$PATH"
+exec "\$top/$rel" -B"\$top" "\$@"
 EOF
 cat > %{buildroot}%{_bindir}/ghc-pkg66 << EOF
 #!/bin/sh

@@ -13,11 +13,10 @@ IN=$ROOT/incoming
 R=$ROOT/build/ref-ghc-bootstrap
 W=$R/build/ghc622-mhs
 GMP_PREFIX=$LIBDIR/gmp612
-HOST_GCC=$LIBDIR/ghc-6.6/bin/host-gcc
 MHS=$LIBDIR/mhs
 
 export STAGE=$ROOT
-export GMP_PREFIX HOST_GCC
+export GMP_PREFIX
 export TMPDIR=$ROOT/tmp
 export GHC_BOOTSTRAP_ROOT=$R
 unset CFLAGS CXXFLAGS LDFLAGS CPPFLAGS RPM_OPT_FLAGS RPM_LD_FLAGS || true
@@ -329,17 +328,42 @@ sh "$R/ghc622/tools/fix-generated-parsers.sh" \
 /bin/cp -f "$IN/alex-Directory.hs" "$ROOT/build/alex210/shims/System/Directory.hs"
 [ -f "$HAPPY_SRC/shipped/Parser.hs" ] && [ -f "$HAPPY_SRC/src/Parser.hs" ] || fail "happy parsers missing"
 
+# Same length as the paths the rpm installs. Happy's and alex's data
+# directories are length-prefixed in the ELF, so the shipped copy can be
+# retargeted by replacing these bytes. mockbuild cannot create /usr/share.
+HAPPY_FINAL=/usr/share/happy-1.16
+ALEX_FINAL=/usr/share/alex-2.1.0
+same_len_tmp() {
+	local final=$1 tag=$2 base n pad
+	base="/tmp/$tag"
+	n=${#final}
+	if [ "${#base}" -gt "$n" ]; then
+		fail "cannot fit $tag into ${n} bytes"
+	fi
+	pad=$(printf '%*s' $((n - ${#base})) '' | tr ' ' 'x')
+	printf '%s%s' "$base" "$pad"
+}
+HAPPY_DATA=$(same_len_tmp "$HAPPY_FINAL" omvhappy)
+ALEX_DATA=$(same_len_tmp "$ALEX_FINAL" omvalex)
+[ "${#HAPPY_DATA}" -eq "${#HAPPY_FINAL}" ] || fail "happy data path length"
+[ "${#ALEX_DATA}" -eq "${#ALEX_FINAL}" ] || fail "alex data path length"
+export HAPPY_DATA ALEX_DATA HAPPY_FINAL ALEX_FINAL
+
 python - "$IN/happy116-build.sh" "$ROOT/build/happy116-build.sh" << 'PY'
-import sys
+import os, sys
 src, dst = sys.argv[1:]
 text = open(src, encoding="utf-8").read()
+happy_data = os.environ["HAPPY_DATA"]
+alex_data = os.environ["ALEX_DATA"]
+if len(happy_data) != len(os.environ["HAPPY_FINAL"]) or len(alex_data) != len(os.environ["ALEX_FINAL"]):
+    sys.exit("data dir stand-in length mismatch")
 repls = [
     ("ROOT=/media/space/repos/GHC-MicroHs-bootstrap\n", "ROOT=${STAGE:?}\n"),
     ("GMP=$ROOT/build/gmp-6.1.2-prefix\n", "GMP=${GMP_PREFIX:?}\n"),
     ('getDataDir = return "$HAPPY_PREFIX/share/happy-1.16"\n',
-     'getDataDir = return "/usr/share/happy-1.16"\n'),
+     'getDataDir = return "%s"\n' % happy_data),
     ('getDataDir = return "$ALEX_PREFIX/share/alex-2.1.0"\n',
-     'getDataDir = return "/usr/share/alex-2.1.0"\n'),
+     'getDataDir = return "%s"\n' % alex_data),
 ]
 for old, new in repls:
     n = text.count(old)
@@ -356,32 +380,45 @@ bash "$ROOT/build/happy116-build.sh"
 [ -x "$ROOT/build/happy-1.16-prefix/bin/happy" ] || fail "happy 1.16 missing"
 [ -x "$ROOT/build/alex-2.1.0-prefix/bin/alex" ] || fail "alex 2.1.0 missing"
 
-plant_share() {
-	local src=$1 live=$2 rel=$3
-	if [ -e "$live" ]; then
-		if [ -f "$live/.omv-bootstrap-datadir" ]; then
-			rm -rf "$live"
-		else
-			fail "refusing to replace $live without the bootstrap marker"
-		fi
-	fi
-	mkdir -p "$live" "$ROOT/dest/$rel"
-	/bin/cp -a "$src"/. "$live"/
-	/bin/cp -a "$src"/. "$ROOT/dest/$rel"/
-	touch "$live/.omv-bootstrap-datadir"
-	rm -f "$ROOT/dest/$rel/.omv-bootstrap-datadir"
+# Templates for this build live at the stand-in paths compiled into the
+# tools. The copies under dest/ are what the rpm installs at /usr/share.
+rm -rf "$HAPPY_DATA" "$ALEX_DATA"
+mkdir -p "$HAPPY_DATA" "$ALEX_DATA" \
+	"$ROOT/dest/share/happy-1.16" "$ROOT/dest/share/alex-2.1.0"
+/bin/cp -a "$ROOT/build/happy-1.16-prefix/share/happy-1.16"/. "$HAPPY_DATA"/
+/bin/cp -a "$ROOT/build/happy-1.16-prefix/share/happy-1.16"/. "$ROOT/dest/share/happy-1.16"/
+/bin/cp -a "$ROOT/build/alex-2.1.0-prefix/share/alex-2.1.0"/. "$ALEX_DATA"/
+/bin/cp -a "$ROOT/build/alex-2.1.0-prefix/share/alex-2.1.0"/. "$ROOT/dest/share/alex-2.1.0"/
+[ -f "$HAPPY_DATA/HappyTemplate-arrays-coerce" ] || fail "happy template missing at stand-in"
+[ -f "$ALEX_DATA/AlexTemplate" ] || fail "alex template missing at stand-in"
+
+retarget_elf() {
+	local src=$1 dst=$2 old=$3 new=$4
+	python - "$src" "$dst" "$old" "$new" "$ROOT" << 'PY'
+import sys
+src, dst, old, new, root = sys.argv[1:]
+old_b, new_b, root_b = old.encode(), new.encode(), root.encode()
+if len(old_b) != len(new_b):
+    sys.exit("length %d != %d for %s" % (len(old_b), len(new_b), old))
+data = open(src, "rb").read()
+n = data.count(old_b)
+if n < 1:
+    sys.exit("path %s not in %s" % (old, src))
+data = data.replace(old_b, new_b)
+if old_b in data or root_b in data:
+    sys.exit("build path remains in %s" % dst)
+open(dst, "wb").write(data)
+PY
+	chmod 755 "$dst"
 }
-plant_share "$ROOT/build/happy-1.16-prefix/share/happy-1.16" /usr/share/happy-1.16 share/happy-1.16
-plant_share "$ROOT/build/alex-2.1.0-prefix/share/alex-2.1.0" /usr/share/alex-2.1.0 share/alex-2.1.0
-/bin/cp -f "$ROOT/build/happy-1.16-prefix/bin/happy" "$ROOT/dest/bin/happy116"
-/bin/cp -f "$ROOT/build/alex-2.1.0-prefix/bin/alex" "$ROOT/dest/bin/alex210"
-chmod 755 "$ROOT/dest/bin/happy116" "$ROOT/dest/bin/alex210"
+retarget_elf "$ROOT/build/happy-1.16-prefix/bin/happy" "$ROOT/dest/bin/happy116" \
+	"$HAPPY_DATA" "$HAPPY_FINAL"
+retarget_elf "$ROOT/build/alex-2.1.0-prefix/bin/alex" "$ROOT/dest/bin/alex210" \
+	"$ALEX_DATA" "$ALEX_FINAL"
 file "$ROOT/dest/bin/happy116" | grep -q ELF || fail "happy116 is not an ELF"
 file "$ROOT/dest/bin/alex210" | grep -q ELF || fail "alex210 is not an ELF"
 
 phase "adapt ghc 6.6 bootstrap"
-mkdir -p "$LIBDIR/ghc-6.6"
-touch "$LIBDIR/ghc-6.6/.omv-bootstrap-hostgcc"
 mkdir -p "$ROOT/build/ghc66-work/src"
 tar -xjf "$IN/ghc-6.6-src.tar.bz2" -C "$ROOT/build/ghc66-work/src"
 [ -d "$ROOT/build/ghc66-work/src/ghc-6.6" ] || fail "ghc 6.6 unpack failed"
@@ -392,13 +429,15 @@ text = open(src, encoding="utf-8").read()
 repls = [
     ("ROOT=/media/space/repos/GHC-MicroHs-bootstrap\n", "ROOT=${STAGE:?}\n"),
     ("GMP=$ROOT/build/gmp-6.1.2-prefix\n", "GMP=${GMP_PREFIX:?}\n"),
-    ('export CC="$WORK/bin/gcc"\n', 'export CC="${HOST_GCC:?}"\n'),
-    ('--with-gcc="$WORK/bin/gcc"', '--with-gcc="${HOST_GCC:?}"'),
+    # cGCC is the bare name host-gcc. GHC execvp's it, and the ghc66
+    # wrapper puts lib/ghc-6.6/bin first on PATH. mockbuild cannot
+    # create /usr/lib64/ghc-6.6 during the build.
+    ('export CC="$WORK/bin/gcc"\n', 'export CC="host-gcc"\n'),
+    ('--with-gcc="$WORK/bin/gcc"', '--with-gcc="host-gcc"'),
     ('chmod +x "$WORK/bin/gcc"\n',
      'chmod +x "$WORK/bin/gcc"\n'
-     'mkdir -p "$(dirname "$HOST_GCC")"\n'
-     '/bin/cp -f "$WORK/bin/gcc" "$HOST_GCC"\n'
-     'chmod 755 "$HOST_GCC"\n'),
+     '/bin/cp -f "$WORK/bin/gcc" "$WORK/bin/host-gcc"\n'
+     'chmod 755 "$WORK/bin/host-gcc"\n'),
 ]
 for old, new in repls:
     n = text.count(old)
@@ -414,14 +453,14 @@ phase "ghc 6.6"
 bash "$ROOT/build/ghc66-bootstrap.sh"
 
 PREFIX=$ROOT/build/ghc66-work/ghc66-prefix
-python - "$ROOT" "$PREFIX" "$HOST_GCC" "$ROOT/dest" << 'PY'
+python - "$ROOT" "$PREFIX" "$ROOT/build/ghc66-work/bin/host-gcc" "$ROOT/dest" << 'PY'
 import os, shutil, sys
-root, prefix, host_gcc, dest = sys.argv[1:]
+root, prefix, wrapper, dest = sys.argv[1:]
 lib = os.path.join(prefix, "lib", "ghc-6.6")
 if not os.path.isdir(lib):
     sys.exit("no lib/ghc-6.6 under %s" % prefix)
 os.makedirs(os.path.join(lib, "bin"), exist_ok=True)
-shutil.copy(host_gcc, os.path.join(lib, "bin", "host-gcc"))
+shutil.copy(wrapper, os.path.join(lib, "bin", "host-gcc"))
 os.chmod(os.path.join(lib, "bin", "host-gcc"), 0o755)
 work = os.path.join(root, "build", "ghc66-work")
 work_gcc = os.path.join(work, "bin", "gcc")
@@ -439,7 +478,7 @@ for dirpath, dirnames, filenames in os.walk(lib):
             continue
         if lib not in text and prefix not in text and work_gcc not in text and work not in text:
             continue
-        text = text.replace(work_gcc, host_gcc)
+        text = text.replace(work_gcc, "host-gcc")
         text = text.replace(lib, "$topdir")
         text = text.replace(prefix, "/usr")
         text = text.replace(work, "/usr")
