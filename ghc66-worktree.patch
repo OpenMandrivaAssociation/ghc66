@@ -229,3 +229,40 @@ index 958cfb3..808c161 100644
      *) printf 'FAIL\t%s\t%s\n' "$m" \
           "$(printf '%s' "$out" | sed 's|.*uncaught exception: ||' | cut -c1-240)" >> "$OUT" ;;
    esac
+
+diff --git a/ghc622/shims-ghc/GhcCompat.hs b/ghc622/shims-ghc/GhcCompat.hs
+index deaf84f..5e0f7d7 100644
+--- a/ghc622/shims-ghc/GhcCompat.hs
++++ b/ghc622/shims-ghc/GhcCompat.hs
+@@ -15,8 +15,12 @@ module GhcCompat(catch, fmapMaybe, genSym, castFloatToInt, castDoubleToInts, fix
+ import GlaExts(pattern I#, pattern C#, pattern W#, pattern F#, pattern D#)
+ 
+ import System.IO.Error(catchIOError)
+-import Data.Double(castDoubleToWord64)
+-import Data.Float(castFloatToWord32)
++-- MicroHs 0.16.6.0 does not export castDoubleToWord64 or castFloatToWord32.
++-- Data.Double exports Double and doubleToInt; Data.Float exports Float,
++-- floatToDouble and doubleToFloat. The bit casts are the primitives those
++-- modules use internally (primWord64FromDoubleRaw / primWordFromFloatRaw).
++import Primitives(primWord64FromDoubleRaw, primWordFromFloatRaw)
++import Data.Word(Word, Word64)
+ import Data.Bits((.&.), shiftR)
+ import Data.IORef
+ import System.IO.Unsafe(unsafePerformIO, unsafeInterleaveIO)
+@@ -53,14 +57,14 @@ genSym = do
+ -- equivalent of. MicroHs does have the casts directly, which is both clearer
+ -- and less dependent on word sizes.
+ castFloatToInt :: Float -> Int
+-castFloatToInt f = fromIntegral (castFloatToWord32 f)
++castFloatToInt f = fromIntegral (primWordFromFloatRaw f :: Word)
+ 
+ -- Two Ints when a Double takes two words, one when it takes one.
+ castDoubleToInts :: Bool -> Double -> [Int]
+ castDoubleToInts big d
+   | big       = [ fromIntegral (w .&. 0xffffffff), fromIntegral (w `shiftR` 32) ]
+   | otherwise = [ fromIntegral w ]
+-  where w = castDoubleToWord64 d
++  where w = primWord64FromDoubleRaw d :: Word64
+ 
+ -- The value-recursion combinator for IO, used by TcMonad to tie the knot when
+ -- typechecking recursive groups.
