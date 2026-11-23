@@ -201,6 +201,9 @@ sh "$R/build/ghc622-mhs/build.sh" all
 
 phase "topdir and base"
 mkdir -p "$W/topdir" "$W/libraries" "$W/lib" "$W/tmp"
+# The kit stores these two as symlinks to the source files. cp refuses
+# to copy a file onto itself, so drop the links and install real copies.
+/bin/rm -f "$W/topdir/package.conf" "$W/topdir/ghc-usage.txt"
 /bin/cp -f "$R/ghc622/base/topdir/package.conf" "$W/topdir/package.conf"
 /bin/cp -f "$R/ghc622/base/topdir/ghc-usage.txt" "$W/topdir/ghc-usage.txt"
 gcc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration -include string.h \
