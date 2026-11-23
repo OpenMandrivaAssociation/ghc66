@@ -266,3 +266,20 @@ index deaf84f..5e0f7d7 100644
  
  -- The value-recursion combinator for IO, used by TcMonad to tie the knot when
  -- typechecking recursive groups.
+
+diff --git a/ghc622/shims/IO.hs b/ghc622/shims/IO.hs
+index 9260b13..28da069 100644
+--- a/ghc622/shims/IO.hs
++++ b/ghc622/shims/IO.hs
+@@ -24,7 +24,10 @@ module IO(module System.IO,
+           hIsEOF, hSeek, hFileSize, catch, try, bracket, bracket_) where
+ import Control.Exception(bracket, bracket_)   -- Haskell 98's IO exported these
+ import System.IO
+-import System.IO.Error
++-- System.IO.Error also exports catch (Control.Exception.Internal.catch).
++-- mhs 0.16.6.0 then rejects the export list as ambiguous against
++-- GhcCompat.catch. Haskell 98's IO.catch is GhcCompat.catch.
++import System.IO.Error hiding (catch)
+ import GhcCompat(catch)
+ 
+ -- MicroHs has hLookAhead but no hIsEOF; the former fails with an EOF error
