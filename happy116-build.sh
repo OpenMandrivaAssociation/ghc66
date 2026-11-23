@@ -440,7 +440,10 @@ if [ ! -f "$ALEX_SRC/shipped/Parser.hs" ]; then
 	/bin/mv -f "$ALEX_SRC/src/Parser.hs" "$ALEX_SRC/src/Scan.hs" "$ALEX_SRC/shipped/"
 fi
 say "STEP alex happy parser"
-"$HAPPY_PREFIX/bin/happy" -agc "$ALEX_SRC/src/Parser.y" -o "$ALEX_SRC/src/Parser.hs" \
+# getDataDir is /usr/share/happy-1.16 in the packaged binary. Those files
+# are planted only after this script returns, so point -t at the copy
+# just installed under the prefix.
+"$HAPPY_PREFIX/bin/happy" -agc -t "$HAPPY_PREFIX/share/happy-1.16" "$ALEX_SRC/src/Parser.y" -o "$ALEX_SRC/src/Parser.hs" \
 	> "$WORK/logs/alex-happy.log" 2>&1 || {
 	say "FAILED: happy 1.16 on alex Parser.y"
 	tail -30 "$WORK/logs/alex-happy.log"
