@@ -1,0 +1,7 @@
+sources:
+  alex-2.1.0.tar.gz: 37599b7be5249d639b3a5a3fdc61907dc4dad660
+  ghc66-bootstrap-kit.tar.gz: 533b0e850c8fb00010643dfcddf91698c8003b15
+  happy-1.16.tar.gz: 5fbf5d61f060efb43efeae048ef1e37ab0bb1c97
+  happy-1.19.5.tar.gz: 60323f24b6c0863393fb02ec0347dfe6f9fb0779
+  ghc-6.2.2-src.tar.bz2: 9ca5bfed02210d3731a76fab5e25a8c690067fde
+  ghc-6.6-src.tar.bz2: 9876dbc46ef22684c2cc95e8dce49b2a1f47017e
