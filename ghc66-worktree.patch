@@ -1,0 +1,231 @@
+diff --git a/build/ghc622-mhs/build.sh b/build/ghc622-mhs/build.sh
+index b425e0d..9efd4db 100755
+--- a/build/ghc622-mhs/build.sh
++++ b/build/ghc622-mhs/build.sh
+@@ -85,7 +85,9 @@ if [ "$step" = cc ] || [ "$step" = all ]; then
+   mkdir -p "$W/rtconf"
+   sed 's/^#define WANT_OVERFLOW 1/#define WANT_OVERFLOW 0  \/* mhs: GHC needs wrap-around Int *\//' \
+       "$M/src/runtime/unix/config.h" > "$W/rtconf/config.h"
+-  cc -w -O3 -I"$W/rtconf" -I"$M/src/runtime" -I"$M/src/runtime/unix" -D__MHS__ \
++  # /usr/bin/cc is clang on this system. The MicroHs runtime and the
++  # generated compiler C are built with gcc, same as the rest of this hop.
++  gcc -w -O3 -I"$W/rtconf" -I"$M/src/runtime" -I"$M/src/runtime/unix" -D__MHS__ \
+      -include "$R/ghc622/stage1/stubs.h" \
+      "$M/src/runtime/main.c" "$M/src/runtime/eval.c" "$R/ghc622/stage1/stubs.c" \
+      "$W/ghc-data.c" "$R/ghc622/stage1/ffi.c" \
+diff --git a/ghc622/base/topdir/package.conf b/ghc622/base/topdir/package.conf
+index f2003fd..b3e1a33 100644
+--- a/ghc622/base/topdir/package.conf
++++ b/ghc622/base/topdir/package.conf
+@@ -4,29 +4,61 @@ Package {
+         auto           = False,
+         import_dirs    = [],
+         source_dirs    = [],
+-        library_dirs   = [ "$libdir/rts" ],
++        library_dirs   = [ "$libdir/rts", "$libdir/lib", "@GMP_LIB@" ],
+         hs_libraries   = [ "HSrts" ],
+         extra_libraries = [ "m", "gmp", "dl" ],
+         include_dirs   = [ "$libdir/includes" ],
+         c_includes     = [ "Stg.h" ],
+         package_deps   = [],
+         extra_ghc_opts = [],
+-        extra_cc_opts  = [],
+-        extra_ld_opts  = []
++        extra_cc_opts  = ["-std=gnu89", "-fpermissive", "-w", "-fwrapv", "-fno-pie", "-include", "Stg.h"],
++        extra_ld_opts  = ["-no-pie", "-L@GMP_LIB@", "-Wl,-rpath,@GMP_LIB@",
++                          "-u", "GHCziBase_Izh_static_info",
++                          "-u", "GHCziBase_Czh_static_info",
++                          "-u", "GHCziFloat_Fzh_static_info",
++                          "-u", "GHCziFloat_Dzh_static_info",
++                          "-u", "GHCziPtr_Ptr_static_info",
++                          "-u", "GHCziWord_Wzh_static_info",
++                          "-u", "GHCziInt_I8zh_static_info",
++                          "-u", "GHCziInt_I16zh_static_info",
++                          "-u", "GHCziInt_I32zh_static_info",
++                          "-u", "GHCziInt_I64zh_static_info",
++                          "-u", "GHCziWord_W8zh_static_info",
++                          "-u", "GHCziWord_W16zh_static_info",
++                          "-u", "GHCziWord_W32zh_static_info",
++                          "-u", "GHCziWord_W64zh_static_info",
++                          "-u", "GHCziStable_StablePtr_static_info",
++                          "-u", "GHCziBase_Izh_con_info",
++                          "-u", "GHCziBase_Czh_con_info",
++                          "-u", "GHCziFloat_Fzh_con_info",
++                          "-u", "GHCziFloat_Dzh_con_info",
++                          "-u", "GHCziPtr_Ptr_con_info",
++                          "-u", "GHCziPtr_FunPtr_con_info",
++                          "-u", "GHCziStable_StablePtr_con_info",
++                          "-u", "GHCziBase_False_closure",
++                          "-u", "GHCziBase_True_closure",
++                          "-u", "GHCziPack_unpackCString_closure",
++                          "-u", "GHCziIOBase_stackOverflow_closure",
++                          "-u", "GHCziIOBase_heapOverflow_closure",
++                          "-u", "GHCziIOBase_NonTermination_closure",
++                          "-u", "GHCziIOBase_BlockedOnDeadMVar_closure",
++                          "-u", "GHCziIOBase_Deadlock_closure",
++                          "-u", "GHCziWeak_runFinalizzerBatch_closure",
++                          "-u", "__stginit_Prelude"]
+ },
+ Package {
+         name           = "base",
+         auto           = True,
+         import_dirs    = [ "$libdir/libraries/base" ],
+         source_dirs    = [],
+-        library_dirs   = [ "$libdir/libraries/base", "$libdir/libraries/base/cbits" ],
++        library_dirs   = [ "$libdir/lib", "$libdir/libraries/base", "$libdir/libraries/base/cbits" ],
+         hs_libraries   = [ "HSbase" ],
+         extra_libraries = [ "HSbase_cbits" ],
+         include_dirs   = [ "$libdir/libraries/base/include" ],
+         c_includes     = [ "HsBase.h" ],
+         package_deps   = [ "rts" ],
+         extra_ghc_opts = [],
+-        extra_cc_opts  = [],
+-        extra_ld_opts  = []
++        extra_cc_opts  = ["-std=gnu89", "-fpermissive", "-w", "-fwrapv", "-fno-pie", "-include", "Stg.h"],
++        extra_ld_opts  = ["-no-pie"]
+ }
+ ]
+diff --git a/ghc622/shims/Directory.hs b/ghc622/shims/Directory.hs
+index 65f980b..5f5d9da 100644
+--- a/ghc622/shims/Directory.hs
++++ b/ghc622/shims/Directory.hs
+@@ -1,11 +1,18 @@
+ -- Haskell 98's Directory (ghc622/shims-h98/Directory.hs re-exports MicroHs's
+--- System.Directory), plus getModificationTime, which GHC 6.0's --make and
+--- recompilation checks use and MicroHs's System.Directory does not provide
+--- (it has no stat). Compiling the compiler never calls it; running --make
+--- would need a stat primitive in MicroHs.
++-- System.Directory), plus getModificationTime. --make compares source and
++-- object timestamps, so this has to be a real stat(2). The C function is
++-- file_mtime in ghc622/stage1/stubs.c, registered in stage1/ffi.c.
+ module Directory(module System.Directory, getModificationTime) where
+ import System.Directory
+-import Time(ClockTime)
++import Time(ClockTime, clockTimeFromSeconds)
++import Foreign.C.String(CString, withCString)
++import Foreign.C.Types(CLong)
++
++foreign import ccall "file_mtime" c_file_mtime :: CString -> IO CLong
+ 
+ getModificationTime :: FilePath -> IO ClockTime
+-getModificationTime _ = ioError (userError "getModificationTime: no stat in MicroHs")
++getModificationTime path = do
++  n <- withCString path c_file_mtime
++  if n < 0
++    then ioError (userError ("getModificationTime: cannot stat " ++ path))
++    else return (clockTimeFromSeconds (toInteger n))
+diff --git a/ghc622/shims/Time.hs b/ghc622/shims/Time.hs
+index 0285277..d5f82bc 100644
+--- a/ghc622/shims/Time.hs
++++ b/ghc622/shims/Time.hs
+@@ -1,12 +1,15 @@
+ -- Haskell 98's Time, as far as GHC 6.0's compiler uses it: ClockTime for
+ -- linkable/source timestamps and getClockTime. MicroHs has no time library;
+ -- the clock comes from time(2) through the FFI.
+-module Time(ClockTime, getClockTime) where
++module Time(ClockTime, getClockTime, clockTimeFromSeconds) where
+ import Foreign.Ptr(Ptr, nullPtr)
+ import Foreign.C.Types(CLong(..))
+ 
+ newtype ClockTime = TOD Integer deriving (Eq, Ord, Show)
+ 
++clockTimeFromSeconds :: Integer -> ClockTime
++clockTimeFromSeconds = TOD
++
+ foreign import ccall "time" c_time :: Ptr CLong -> IO CLong
+ 
+ getClockTime :: IO ClockTime
+diff --git a/ghc622/stage1/ffi.c b/ghc622/stage1/ffi.c
+index 8b9c249..17f7d94 100644
+--- a/ghc622/stage1/ffi.c
++++ b/ghc622/stage1/ffi.c
+@@ -11,6 +11,7 @@
+  *   DriverFlags          setHeapSize :: Int -> IO ()   (-H<size>)
+  *   DriverFlags          enableTimingStats :: IO ()    (-Rghc-timing)
+  *   Posix shim           c_getpid    :: IO CInt        (SysTools.newTempName)
++ *   Directory shim       c_file_mtime :: CString -> IO CLong
+  */
+ #include "mhsffi.h"
+ #include "stubs.h"
+@@ -19,12 +20,14 @@ from_t mhs_rawSystem(int s) { return mhs_from_Int(s, 2, rawSystem(mhs_to_Ptr(s,
+ from_t mhs_enableTimingStats(int s) { enableTimingStats(); return mhs_from_Unit(s, 0); }
+ from_t mhs_setHeapSize(int s) { setHeapSize(mhs_to_Int(s, 0)); return mhs_from_Unit(s, 1); }
+ from_t mhs_getpid(int s) { return mhs_from_Int(s, 0, getpid()); }
++from_t mhs_file_mtime(int s) { return mhs_from_Int(s, 1, file_mtime(mhs_to_Ptr(s, 0))); }
+ 
+ static const struct ffi_entry imp_table[] = {
+ { "rawSystem", 2, mhs_rawSystem},
+ { "enableTimingStats", 0, mhs_enableTimingStats},
+ { "setHeapSize", 1, mhs_setHeapSize},
+ { "getpid", 0, mhs_getpid},
++{ "file_mtime", 1, mhs_file_mtime},
+ { 0,0 }
+ };
+ const struct ffi_entry *xffi_table = imp_table;
+diff --git a/ghc622/stage1/stubs.c b/ghc622/stage1/stubs.c
+index e46f952..40d18d1 100644
+--- a/ghc622/stage1/stubs.c
++++ b/ghc622/stage1/stubs.c
+@@ -10,6 +10,7 @@
+ #include <stdint.h>
+ #include <errno.h>
+ #include <unistd.h>
++#include <sys/stat.h>
+ #include <sys/wait.h>
+ #include <sys/time.h>
+ 
+@@ -48,3 +49,12 @@ rawSystem(const char *cmd, char **args)
+ 
+ void setHeapSize(intptr_t n) { (void)n; }
+ void enableTimingStats(void) { }
++
++intptr_t
++file_mtime(const char *path)
++{
++    struct stat st;
++    if (path == 0 || stat(path, &st) != 0)
++        return -1;
++    return (intptr_t)st.st_mtime;
++}
+diff --git a/ghc622/stage1/stubs.h b/ghc622/stage1/stubs.h
+index b8abc81..90e9f25 100644
+--- a/ghc622/stage1/stubs.h
++++ b/ghc622/stage1/stubs.h
+@@ -6,3 +6,5 @@
+ intptr_t rawSystem(const char *cmd, char **args);
+ void setHeapSize(intptr_t n);
+ void enableTimingStats(void);
++/* st_mtime, or -1 if stat fails. */
++intptr_t file_mtime(const char *path);
+diff --git a/ghc622/tools/probe-ordered.sh b/ghc622/tools/probe-ordered.sh
+index 958cfb3..808c161 100644
+--- a/ghc622/tools/probe-ordered.sh
++++ b/ghc622/tools/probe-ordered.sh
+@@ -64,15 +64,24 @@ while read -r m; do
+   # A crash mid-write (e.g. a stack overflow) leaves .mhscache truncated and
+   # every later module fails with "Bad LZMA signature". Keep a copy of the last
+   # good cache and fall back to it once, so one crash cannot void the run.
+-  case "$out" in *"Bad LZMA signature"*)
+-    if [ -f .mhscache.good ]; then cp .mhscache.good .mhscache
++  # A killed or crashed mhs can leave .mhscache empty or truncated.
++  # "Bad LZMA" and "end of file" are that corruption, not a module error.
++  case "$out" in
++  *"Bad LZMA signature"*|*"end of file"*|*"hGetChar"*)
++    if [ -f .mhscache.good ]; then
++      cp .mhscache.good .mhscache
+       raw=$(timeout "${MODTIMEOUT:-180}" "$M/bin/mhs" ${MHSRTS:-+RTS -K20M -RTS} -C -c -XCPP $HSCPP -DOMIT_NATIVE_CODEGEN $DEFS $INC "$m" 2>&1); rc=$?
+       out=$(printf '%s' "$raw" | tr '\n' ' ')
+     fi ;;
+   esac
+   case "$rc" in
+     0)   printf 'OK\t%s\t\n' "$m" >> "$OUT"; cp .mhscache .mhscache.good 2>/dev/null ;;
+-    124) printf 'TIMEOUT\t%s\tkilled after ${MODTIMEOUT:-180}s\n' "$m" >> "$OUT" ;;
++    124)
++      printf 'TIMEOUT\t%s\tkilled after %ss\n' "$m" "${MODTIMEOUT:-180}" >> "$OUT"
++      # timeout can truncate the cache mid-write. Put the last good copy back
++      # before the next module so one slow file does not fail the rest.
++      if [ -f .mhscache.good ]; then cp .mhscache.good .mhscache; fi
++      ;;
+     *) printf 'FAIL\t%s\t%s\n' "$m" \
+          "$(printf '%s' "$out" | sed 's|.*uncaught exception: ||' | cut -c1-240)" >> "$OUT" ;;
+   esac
